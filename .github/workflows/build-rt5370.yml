@@ -1,0 +1,143 @@
+name: Build RT5370 (rt2800usb) for Galaxy J2 Pro msm8937
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout kernel source
+        uses: actions/checkout@v4
+        with:
+          repository: X10FK17Q/samsung_SM-J250F
+          ref: main
+          fetch-depth: 1
+
+      - name: Install cross-compile toolchain & dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y \
+            gcc-arm-linux-gnueabi \
+            binutils-arm-linux-gnueabi \
+            bc bison flex libssl-dev \
+            libelf-dev make python3 \
+            zip
+
+      - name: Set build environment
+        run: |
+          echo "ARCH=arm" >> $GITHUB_ENV
+          echo "CROSS_COMPILE=arm-linux-gnueabi-" >> $GITHUB_ENV
+          echo "KDIR=$(pwd)" >> $GITHUB_ENV
+          arm-linux-gnueabi-gcc --version
+
+      - name: Load defconfig
+        run: |
+          make ARCH=arm CROSS_COMPILE=arm-linux-gnueabi- \
+            msm8937_sec_j2y18lte_mea_open_defconfig
+
+      - name: Enable RT2X00 / RT5370 modules
+        run: |
+          scripts/config \
+            --enable CONFIG_WLAN \
+            --enable CONFIG_CFG80211 \
+            --module CONFIG_RT2X00 \
+            --module CONFIG_RT2X00_LIB \
+            --enable CONFIG_RT2X00_LIB_FIRMWARE \
+            --module CONFIG_RT2X00_USB \
+            --module CONFIG_RT2800LIB \
+            --module CONFIG_RT2800USB \
+            --enable CONFIG_RT2800USB_RT53XX \
+            --enable CONFIG_RT2800USB_RT55XX \
+            --enable CONFIG_RT2X00_DEBUG || true
+          make ARCH=arm CROSS_COMPILE=arm-linux-gnueabi- olddefconfig
+
+      - name: Verify RT2X00 config
+        run: |
+          echo "=== RT2X00 config check ==="
+          grep -E "RT2X00|RT2800|RT53XX" .config || echo "WARNING: RT2X00 not found in config"
+
+      - name: Build kernel headers (prepare)
+        run: |
+          make ARCH=arm CROSS_COMPILE=arm-linux-gnueabi- \
+            -j$(nproc) prepare modules_prepare
+
+      - name: Compile RT5370 modules only
+        run: |
+          make ARCH=arm CROSS_COMPILE=arm-linux-gnueabi- \
+            -j$(nproc) \
+            M=drivers/net/wireless/ralink/rt2x00 \
+            modules 2>&1 | tee build.log
+
+      - name: List compiled modules
+        run: |
+          echo "=== Compiled .ko files ==="
+          find drivers/net/wireless/ralink/rt2x00 -name "*.ko" -exec ls -lh {} \;
+
+      - name: Strip debug symbols (smaller size)
+        run: |
+          find drivers/net/wireless/ralink/rt2x00 -name "*.ko" | while read f; do
+            arm-linux-gnueabi-strip --strip-debug "$f" || true
+          done
+
+      - name: Package modules
+        run: |
+          mkdir -p output/rt5370_modules
+          find drivers/net/wireless/ralink/rt2x00 -name "*.ko" \
+            -exec cp {} output/rt5370_modules/ \;
+          # Create load script
+          cat > output/rt5370_modules/load_rt5370.sh << 'SCRIPT'
+          #!/system/bin/sh
+          # Load RT5370 WiFi USB driver on Android (requires root)
+          # Run as: su -c "sh /data/local/tmp/load_rt5370.sh"
+          BASE=/data/local/tmp
+          echo "[+] Loading rt2x00lib..."
+          insmod $BASE/rt2x00lib.ko
+          echo "[+] Loading rt2x00usb..."
+          insmod $BASE/rt2x00usb.ko
+          echo "[+] Loading rt2800lib..."
+          insmod $BASE/rt2800lib.ko
+          echo "[+] Loading rt2800usb (RT5370)..."
+          insmod $BASE/rt2800usb.ko
+          echo "[+] Done. Check: dmesg | grep -i rt2800"
+          SCRIPT
+          # Info file
+          cat > output/rt5370_modules/README.txt << 'INFO'
+          RT5370 WiFi USB Driver for Galaxy J2 Pro (SM-J250F)
+          Kernel: 3.18.x msm8937 ARMv7
+          Built from: https://github.com/X10FK17Q/samsung_SM-J250F
+
+          INSTALL STEPS (requires root):
+          1. adb push *.ko /data/local/tmp/
+          2. adb push load_rt5370.sh /data/local/tmp/
+          3. adb shell su -c "sh /data/local/tmp/load_rt5370.sh"
+          4. Plug in RT5370 USB WiFi adapter
+          5. adb shell su -c "dmesg | grep -i rt2800"
+
+          NOTE: If insmod fails with "Invalid module format",
+          the kernel vermagic does not match. You need the exact
+          PsychicGirl kernel source to build matching modules.
+          INFO
+          cd output
+          zip -r rt5370_modules_j2pro_msm8937.zip rt5370_modules/
+          echo "=== Package contents ==="
+          ls -lh rt5370_modules_j2pro_msm8937.zip
+
+      - name: Upload modules as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: rt5370-modules-j2pro-msm8937
+          path: output/rt5370_modules_j2pro_msm8937.zip
+          retention-days: 30
+
+      - name: Upload build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: build.log
+          retention-days: 7
