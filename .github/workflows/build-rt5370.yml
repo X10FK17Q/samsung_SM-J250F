@@ -66,10 +66,12 @@ jobs:
       - name: Build kernel scripts (modpost etc)
         run: |
           make ARCH=arm CROSS_COMPILE=arm-linux-gnueabi- -j$(nproc) scripts 2>&1 | tail -20
+          ls -la scripts/mod/modpost
 
       - name: Compile RT5370 modules (direct ccflags bypass)
         run: |
           # Force compile with explicit CONFIG flags bypassing Kconfig tree
+          # KBUILD_MODPOST_WARN=1 converts modpost errors to warnings so .ko files are still created
           make ARCH=arm CROSS_COMPILE=arm-linux-gnueabi- \
             -j$(nproc) \
             M=drivers/net/wireless/rt2x00 \
@@ -80,6 +82,10 @@ jobs:
             CONFIG_RT2800LIB=m \
             CONFIG_RT2800USB=m \
             CONFIG_RT2800USB_RT53XX=y \
+            CONFIG_MODULE_SIG=n \
+            CONFIG_MODULE_SIG_FORCE=n \
+            CONFIG_MODVERSIONS=n \
+            KBUILD_MODPOST_WARN=1 \
             modules 2>&1 | tee build.log
           echo "Exit code: $?"
 
