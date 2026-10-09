@@ -105,6 +105,10 @@ jobs:
           if [ -f rt2800lib.o ]; then
             arm-linux-gnueabi-ld -r -o rt2800lib.ko rt2800lib.o && echo "rt2800lib.ko created" || echo "rt2800lib.ko failed"
           fi
+          # rt2800usb.ko
+          if [ -f rt2800usb.o ]; then
+            arm-linux-gnueabi-ld -r -o rt2800usb.ko rt2800usb.o && echo "rt2800usb.ko created" || echo "rt2800usb.ko failed"
+          fi
           cd ../../../../
           echo "Exit: done"
 
