@@ -18,116 +18,127 @@ jobs:
           ref: main
           fetch-depth: 1
 
-      - name: Install cross-compile toolchain & dependencies
+      - name: Install dependencies
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y \
             gcc-arm-linux-gnueabi \
             binutils-arm-linux-gnueabi \
             bc bison flex libssl-dev \
-            libelf-dev make python3 \
-            zip
+            libelf-dev make zip wget
+
+      - name: Fix python2 symlink (needed by old Makefile)
+        run: |
+          sudo ln -sf /usr/bin/python3 /usr/local/bin/python2 || true
+          sudo ln -sf /usr/bin/python3 /usr/local/bin/python || true
 
       - name: Set build environment
         run: |
           echo "ARCH=arm" >> $GITHUB_ENV
           echo "CROSS_COMPILE=arm-linux-gnueabi-" >> $GITHUB_ENV
-          echo "KDIR=$(pwd)" >> $GITHUB_ENV
           arm-linux-gnueabi-gcc --version
+
+      - name: Fetch RT2X00 driver sources from upstream linux-3.18.y
+        run: |
+          mkdir -p drivers/net/wireless/ralink/rt2x00
+          BASE=https://raw.githubusercontent.com/torvalds/linux/v3.18/drivers/net/wireless/ralink/rt2x00
+          for f in \
+            rt2x00.h rt2x00dev.c rt2x00lib.h rt2x00lib.c \
+            rt2x00config.c rt2x00crypto.c rt2x00debug.c rt2x00debug.h \
+            rt2x00dump.h rt2x00firmware.c rt2x00leds.c rt2x00leds.h \
+            rt2x00link.c rt2x00mac.c rt2x00mmio.c rt2x00mmio.h \
+            rt2x00queue.c rt2x00queue.h rt2x00reg.h rt2x00soc.c \
+            rt2x00usb.c rt2x00usb.h \
+            rt2800lib.c rt2800lib.h rt2800.h \
+            rt2800usb.c rt2800usb.h \
+            Kconfig Makefile; do
+            wget -q "$BASE/$f" -O "drivers/net/wireless/ralink/rt2x00/$f" || \
+              echo "WARNING: could not fetch $f"
+          done
+          echo "=== RT2X00 files fetched ==="
+          ls -la drivers/net/wireless/ralink/rt2x00/
 
       - name: Load defconfig
         run: |
           make ARCH=arm CROSS_COMPILE=arm-linux-gnueabi- \
             msm8937_sec_j2y18lte_mea_open_defconfig
 
-      - name: Enable RT2X00 / RT5370 modules
+      - name: Enable RT2X00 config symbols
         run: |
-          scripts/config \
-            --enable CONFIG_WLAN \
-            --enable CONFIG_CFG80211 \
-            --module CONFIG_RT2X00 \
-            --module CONFIG_RT2X00_LIB \
-            --enable CONFIG_RT2X00_LIB_FIRMWARE \
-            --module CONFIG_RT2X00_USB \
-            --module CONFIG_RT2800LIB \
-            --module CONFIG_RT2800USB \
-            --enable CONFIG_RT2800USB_RT53XX \
-            --enable CONFIG_RT2800USB_RT55XX \
-            --enable CONFIG_RT2X00_DEBUG || true
+          # Inject RT2X00 config directly
+          cat >> .config << 'EOF'
+          CONFIG_RT2X00=m
+          CONFIG_RT2X00_LIB=m
+          CONFIG_RT2X00_LIB_FIRMWARE=y
+          CONFIG_RT2X00_USB=m
+          CONFIG_RT2800LIB=m
+          CONFIG_RT2800USB=m
+          CONFIG_RT2800USB_RT53XX=y
+          CONFIG_RT2800USB_RT55XX=y
+          CONFIG_WLAN=y
+          EOF
           make ARCH=arm CROSS_COMPILE=arm-linux-gnueabi- olddefconfig
 
       - name: Verify RT2X00 config
         run: |
-          echo "=== RT2X00 config check ==="
-          grep -E "RT2X00|RT2800|RT53XX" .config || echo "WARNING: RT2X00 not found in config"
+          echo "=== RT2X00 config ==="
+          grep -E "RT2X00|RT2800|RT53XX" .config || echo "WARNING: not in config"
 
-      - name: Build kernel headers (prepare)
+      - name: Prepare kernel build system
         run: |
           make ARCH=arm CROSS_COMPILE=arm-linux-gnueabi- \
-            -j$(nproc) prepare modules_prepare
+            -j$(nproc) prepare 2>&1 | tail -20
 
-      - name: Compile RT5370 modules only
+      - name: Generate kernel headers
+        run: |
+          make ARCH=arm CROSS_COMPILE=arm-linux-gnueabi- \
+            -j$(nproc) scripts 2>&1 | tail -20
+
+      - name: Compile RT5370 modules
         run: |
           make ARCH=arm CROSS_COMPILE=arm-linux-gnueabi- \
             -j$(nproc) \
             M=drivers/net/wireless/ralink/rt2x00 \
             modules 2>&1 | tee build.log
 
-      - name: List compiled modules
+      - name: List compiled .ko files
         run: |
-          echo "=== Compiled .ko files ==="
+          echo "=== Compiled modules ==="
           find drivers/net/wireless/ralink/rt2x00 -name "*.ko" -exec ls -lh {} \;
 
-      - name: Strip debug symbols (smaller size)
-        run: |
-          find drivers/net/wireless/ralink/rt2x00 -name "*.ko" | while read f; do
-            arm-linux-gnueabi-strip --strip-debug "$f" || true
-          done
-
-      - name: Package modules
+      - name: Strip & package modules
         run: |
           mkdir -p output/rt5370_modules
-          find drivers/net/wireless/ralink/rt2x00 -name "*.ko" \
-            -exec cp {} output/rt5370_modules/ \;
-          # Create load script
+          find drivers/net/wireless/ralink/rt2x00 -name "*.ko" | while read f; do
+            arm-linux-gnueabi-strip --strip-debug "$f" || true
+            cp "$f" output/rt5370_modules/
+          done
           cat > output/rt5370_modules/load_rt5370.sh << 'SCRIPT'
-          #!/system/bin/sh
-          # Load RT5370 WiFi USB driver on Android (requires root)
-          # Run as: su -c "sh /data/local/tmp/load_rt5370.sh"
-          BASE=/data/local/tmp
-          echo "[+] Loading rt2x00lib..."
-          insmod $BASE/rt2x00lib.ko
-          echo "[+] Loading rt2x00usb..."
-          insmod $BASE/rt2x00usb.ko
-          echo "[+] Loading rt2800lib..."
-          insmod $BASE/rt2800lib.ko
-          echo "[+] Loading rt2800usb (RT5370)..."
-          insmod $BASE/rt2800usb.ko
-          echo "[+] Done. Check: dmesg | grep -i rt2800"
-          SCRIPT
-          # Info file
+#!/system/bin/sh
+# Load RT5370 driver - run as root: su -c "sh /data/local/tmp/load_rt5370.sh"
+BASE=/data/local/tmp
+insmod $BASE/rt2x00lib.ko && echo "[OK] rt2x00lib"
+insmod $BASE/rt2x00usb.ko && echo "[OK] rt2x00usb"
+insmod $BASE/rt2800lib.ko && echo "[OK] rt2800lib"
+insmod $BASE/rt2800usb.ko && echo "[OK] rt2800usb"
+echo "Plug in RT5370 USB WiFi, then: dmesg | grep -i rt2800"
+SCRIPT
           cat > output/rt5370_modules/README.txt << 'INFO'
-          RT5370 WiFi USB Driver for Galaxy J2 Pro (SM-J250F)
-          Kernel: 3.18.x msm8937 ARMv7
-          Built from: https://github.com/X10FK17Q/samsung_SM-J250F
+RT5370 WiFi USB Driver - Galaxy J2 Pro (SM-J250F) msm8937 ARMv7
+Built from: https://github.com/X10FK17Q/samsung_SM-J250F
 
-          INSTALL STEPS (requires root):
-          1. adb push *.ko /data/local/tmp/
-          2. adb push load_rt5370.sh /data/local/tmp/
-          3. adb shell su -c "sh /data/local/tmp/load_rt5370.sh"
-          4. Plug in RT5370 USB WiFi adapter
-          5. adb shell su -c "dmesg | grep -i rt2800"
+HOW TO USE (requires root):
+  adb push *.ko /data/local/tmp/
+  adb push load_rt5370.sh /data/local/tmp/
+  adb shell su -c "sh /data/local/tmp/load_rt5370.sh"
 
-          NOTE: If insmod fails with "Invalid module format",
-          the kernel vermagic does not match. You need the exact
-          PsychicGirl kernel source to build matching modules.
-          INFO
+If insmod fails with "Invalid module format" = vermagic mismatch.
+INFO
           cd output
           zip -r rt5370_modules_j2pro_msm8937.zip rt5370_modules/
-          echo "=== Package contents ==="
           ls -lh rt5370_modules_j2pro_msm8937.zip
 
-      - name: Upload modules as artifact
+      - name: Upload modules artifact
         uses: actions/upload-artifact@v4
         with:
           name: rt5370-modules-j2pro-msm8937
