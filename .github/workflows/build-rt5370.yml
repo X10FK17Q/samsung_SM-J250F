@@ -23,10 +23,26 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y gcc-arm-linux-gnueabi binutils-arm-linux-gnueabi bc bison flex libssl-dev libelf-dev make zip wget
 
-      - name: Fix python symlink
+      - name: Fix python symlink and kernel compatibility patches
         run: |
           sudo ln -sf /usr/bin/python3 /usr/local/bin/python2 || true
           sudo ln -sf /usr/bin/python3 /usr/local/bin/python || true
+
+      - name: Patch kernel for GCC >= 10 and Python 3 compatibility
+        run: |
+          # Fix 1: gcc-wrapper.py uses Python 2 print syntax -> patch to Python 3
+          sed -i 's/print "error, forbidden warning:", m.group(2)/print("error, forbidden warning:", m.group(2))/' scripts/gcc-wrapper.py
+          sed -i 's/print "suppressing warning: %s" % m.group(2)/print("suppressing warning: %s" % m.group(2))/' scripts/gcc-wrapper.py
+          echo "gcc-wrapper.py patched"
+
+          # Fix 2: scripts/dtc yylloc multiple definition (GCC >= 10 strict common)
+          sed -i 's/YYLTYPE yylloc;/extern YYLTYPE yylloc;/' scripts/dtc/dtc-lexer.lex.c_shipped || true
+          sed -i 's/YYLTYPE yylloc;/extern YYLTYPE yylloc;/' scripts/dtc/dtc-lexer.l || true
+          echo "dtc yylloc patched"
+
+          # Fix 3: remove -Werror-type flags that fail with modern GCC
+          sed -i 's/-Werror-implicit-function-declaration//' Makefile || true
+          echo "Makefile patched"
 
       - name: Fetch RT2X00 driver sources from upstream linux v3.18
         run: |
@@ -44,15 +60,7 @@ jobs:
 
       - name: Enable RT2X00 config symbols
         run: |
-          cat >> .config << 'ENDOFCONFIG'
-          CONFIG_RT2X00=m
-          CONFIG_RT2X00_LIB=m
-          CONFIG_RT2X00_LIB_FIRMWARE=y
-          CONFIG_RT2X00_USB=m
-          CONFIG_RT2800LIB=m
-          CONFIG_RT2800USB=m
-          CONFIG_RT2800USB_RT53XX=y
-          ENDOFCONFIG
+          printf 'CONFIG_RT2X00=m\nCONFIG_RT2X00_LIB=m\nCONFIG_RT2X00_LIB_FIRMWARE=y\nCONFIG_RT2X00_USB=m\nCONFIG_RT2800LIB=m\nCONFIG_RT2800USB=m\nCONFIG_RT2800USB_RT53XX=y\n' >> .config
           make ARCH=arm CROSS_COMPILE=arm-linux-gnueabi- olddefconfig
 
       - name: Verify RT2X00 config
