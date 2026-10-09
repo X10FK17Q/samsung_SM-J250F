@@ -23,41 +23,13 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y gcc-arm-linux-gnueabi binutils-arm-linux-gnueabi bc bison flex libssl-dev libelf-dev make zip wget
 
-      - name: Fix python symlink and kernel compatibility patches
+      - name: Fix python symlink
         run: |
           sudo ln -sf /usr/bin/python3 /usr/local/bin/python2 || true
           sudo ln -sf /usr/bin/python3 /usr/local/bin/python || true
 
-      - name: Patch kernel for GCC >= 10 and Python 3 compatibility
-        run: |
-          # Fix 1: gcc-wrapper.py - convert ALL Python 2 print statements to Python 3
-          # Uses python3 itself to do the conversion safely
-          python3 -c "
-import re, sys
-with open('scripts/gcc-wrapper.py', 'r') as f:
-    content = f.read()
-# Replace: print \"...\", var  ->  print(\"...\", var)
-content = re.sub(r'print (\"[^\"]*\"),\s*(.*)', r'print(\1, \2)', content)
-# Replace: print \"...\" % var  ->  print(\"...\" % var)
-content = re.sub(r'print (\"[^\"]*\" % \S+)', r'print(\1)', content)
-# Replace standalone: print line,  ->  print(line, end=' ')
-content = re.sub(r'print line,', r'print(line, end=\" \")', content)
-# Replace: print line  ->  print(line)
-content = re.sub(r'^(\s*)print line\s*$', r'\1print(line)', content, flags=re.MULTILINE)
-with open('scripts/gcc-wrapper.py', 'w') as f:
-    f.write(content)
-print('gcc-wrapper.py patched')
-"
-          python3 -c "import py_compile; py_compile.compile('scripts/gcc-wrapper.py')" && echo "gcc-wrapper.py syntax OK"
-
-          # Fix 2: scripts/dtc yylloc multiple definition (GCC >= 10 strict common)
-          sed -i 's/^YYLTYPE yylloc;/extern YYLTYPE yylloc;/' scripts/dtc/dtc-lexer.lex.c_shipped || true
-          sed -i 's/^YYLTYPE yylloc;/extern YYLTYPE yylloc;/' scripts/dtc/dtc-lexer.l || true
-          echo "dtc yylloc patched"
-
-          # Fix 3: scripts/mod - also has Python 2 print issues, build modpost from host gcc directly
-          # Nothing to patch here; modpost builds with host gcc, issue is gcc-wrapper intercepting it
-          echo "patches done"
+      - name: Patch kernel for Python3 and GCC >= 10 compatibility
+        run: python3 patch_kernel.py
 
       - name: Fetch RT2X00 driver sources from upstream linux v3.18
         run: |
@@ -87,7 +59,7 @@ print('gcc-wrapper.py patched')
         run: |
           make ARCH=arm CROSS_COMPILE=arm-linux-gnueabi- -j$(nproc) prepare 2>&1 | tail -30
 
-      - name: Build kernel scripts
+      - name: Build kernel scripts (modpost etc)
         run: |
           make ARCH=arm CROSS_COMPILE=arm-linux-gnueabi- -j$(nproc) scripts 2>&1 | tail -20
 
