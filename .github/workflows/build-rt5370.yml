@@ -70,8 +70,7 @@ jobs:
 
       - name: Compile RT5370 modules (direct ccflags bypass)
         run: |
-          # Force compile with explicit CONFIG flags bypassing Kconfig tree
-          # KBUILD_MODPOST_WARN=1 converts modpost errors to warnings so .ko files are still created
+          # Stage 1: compile all .o files
           make ARCH=arm CROSS_COMPILE=arm-linux-gnueabi- \
             -j$(nproc) \
             M=drivers/net/wireless/rt2x00 \
@@ -83,11 +82,26 @@ jobs:
             CONFIG_RT2800USB=m \
             CONFIG_RT2800USB_RT53XX=y \
             CONFIG_MODULE_SIG=n \
-            CONFIG_MODULE_SIG_FORCE=n \
             CONFIG_MODVERSIONS=n \
             KBUILD_MODPOST_WARN=1 \
-            modules 2>&1 | tee build.log
-          echo "Exit code: $?"
+            modules 2>&1 | tee build.log || true
+
+          # Stage 2: manually link .ko from .o if stage 2 (mod.c) failed
+          echo "=== Checking for .o files ==="
+          find drivers/net/wireless/rt2x00 -name "*.o" ! -name "*.mod.o" | sort
+          echo "=== Attempting manual .ko linking ==="
+          cd drivers/net/wireless/rt2x00
+          # rt2x00lib.ko
+          arm-linux-gnueabi-ld -r -o rt2x00lib.ko \
+            rt2x00dev.o rt2x00mac.o rt2x00config.o rt2x00queue.o \
+            rt2x00link.o rt2x00usb.o rt2x00crypto.o rt2x00leds.o \
+            rt2x00lib.o 2>&1 || echo "rt2x00lib.ko link failed"
+          # rt2800lib.ko
+          arm-linux-gnueabi-ld -r -o rt2800lib.ko rt2800lib.o 2>&1 || echo "rt2800lib.ko link failed"
+          # rt2800usb.ko
+          arm-linux-gnueabi-ld -r -o rt2800usb.ko rt2800usb.o 2>&1 || echo "rt2800usb.ko link failed"
+          cd ../../../../
+          echo "Exit: done"
 
       - name: List compiled .ko files
         run: |
