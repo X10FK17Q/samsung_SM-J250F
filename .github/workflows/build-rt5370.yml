@@ -35,10 +35,14 @@ jobs:
         run: |
           mkdir -p drivers/net/wireless/rt2x00
           BASE="https://raw.githubusercontent.com/torvalds/linux/v3.18/drivers/net/wireless/rt2x00"
-          FILES="rt2x00.h rt2x00dev.c rt2x00lib.h rt2x00lib.c rt2x00config.c rt2x00crypto.c rt2x00debug.c rt2x00debug.h rt2x00dump.h rt2x00firmware.c rt2x00leds.c rt2x00leds.h rt2x00link.c rt2x00mac.c rt2x00mmio.c rt2x00mmio.h rt2x00queue.c rt2x00queue.h rt2x00reg.h rt2x00soc.c rt2x00usb.c rt2x00usb.h rt2800lib.c rt2800lib.h rt2800.h rt2800usb.c rt2800usb.h Kconfig Makefile"
+          FILES="rt2x00.h rt2x00dev.c rt2x00lib.h rt2x00lib.c rt2x00config.c rt2x00crypto.c rt2x00debug.c rt2x00debug.h rt2x00dump.h rt2x00leds.c rt2x00leds.h rt2x00link.c rt2x00mac.c rt2x00mmio.c rt2x00mmio.h rt2x00queue.c rt2x00queue.h rt2x00reg.h rt2x00soc.c rt2x00usb.c rt2x00usb.h rt2800lib.c rt2800lib.h rt2800.h rt2800usb.c rt2800usb.h Kconfig Makefile"
           for f in $FILES; do
             wget -q "$BASE/$f" -O "drivers/net/wireless/rt2x00/$f" || echo "WARNING: could not fetch $f"
           done
+          # Remove rt2x00firmware.o from Makefile (firmware fns are inline in rt2x00lib.h when CONFIG_RT2X00_LIB_FIRMWARE=y)
+          sed -i '/rt2x00firmware\.o/d' drivers/net/wireless/rt2x00/Makefile
+          echo "=== rt2x00 Makefile after patch ==="
+          cat drivers/net/wireless/rt2x00/Makefile
           ls -la drivers/net/wireless/rt2x00/
 
       - name: Load defconfig
