@@ -49,6 +49,20 @@ if os.path.exists(path):
 else:
     print("[SKIP] gcc-wrapper.py not found")
 
+# ── Patch 3: Remove rt2x00firmware.c from rt2x00 Makefile ───────────────────
+# rt2x00lib.h declares firmware fns as static inline when CONFIG_RT2X00_LIB_FIRMWARE=y
+# Compiling rt2x00firmware.c separately causes redefinition errors.
+mf = 'drivers/net/wireless/rt2x00/Makefile'
+if os.path.exists(mf):
+    src = open(mf).read()
+    new = src.replace('rt2x00lib-$(CONFIG_RT2X00_LIB_FIRMWARE)\t\t+= rt2x00firmware.o\n', '')
+    new = new.replace('rt2x00lib-$(CONFIG_RT2X00_LIB_FIRMWARE) += rt2x00firmware.o\n', '')
+    if new != src:
+        open(mf, 'w').write(new)
+        print(f"[OK] {mf} rt2x00firmware.o removed")
+    else:
+        print(f"[INFO] {mf} - rt2x00firmware line not found, may be OK")
+
 # ── Patch 2: dtc yylloc (GCC>=10 strict no-common) ───────────────────────────
 for p in ['scripts/dtc/dtc-lexer.lex.c_shipped', 'scripts/dtc/dtc-lexer.l']:
     if os.path.exists(p):
