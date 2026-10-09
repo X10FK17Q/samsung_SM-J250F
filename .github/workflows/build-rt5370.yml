@@ -86,20 +86,23 @@ jobs:
             KBUILD_MODPOST_WARN=1 \
             modules 2>&1 | tee build.log || true
 
-          # Stage 2: manually link .ko from .o if stage 2 (mod.c) failed
+          # Stage 2: manually link missing .ko files from built-in .o
           echo "=== Checking for .o files ==="
           find drivers/net/wireless/rt2x00 -name "*.o" ! -name "*.mod.o" | sort
           echo "=== Attempting manual .ko linking ==="
           cd drivers/net/wireless/rt2x00
-          # rt2x00lib.ko
-          arm-linux-gnueabi-ld -r -o rt2x00lib.ko \
-            rt2x00dev.o rt2x00mac.o rt2x00config.o rt2x00queue.o \
-            rt2x00link.o rt2x00usb.o rt2x00crypto.o rt2x00leds.o \
-            rt2x00lib.o 2>&1 || echo "rt2x00lib.ko link failed"
+          # rt2x00lib.o is already a combined relocatable - just rename to .ko
+          if [ -f rt2x00lib.o ]; then
+            cp rt2x00lib.o rt2x00lib.ko && echo "rt2x00lib.ko created"
+          fi
+          # rt2x00usb.ko
+          if [ -f rt2x00usb.o ]; then
+            arm-linux-gnueabi-ld -r -o rt2x00usb.ko rt2x00usb.o && echo "rt2x00usb.ko created" || echo "rt2x00usb.ko failed"
+          fi
           # rt2800lib.ko
-          arm-linux-gnueabi-ld -r -o rt2800lib.ko rt2800lib.o 2>&1 || echo "rt2800lib.ko link failed"
-          # rt2800usb.ko
-          arm-linux-gnueabi-ld -r -o rt2800usb.ko rt2800usb.o 2>&1 || echo "rt2800usb.ko link failed"
+          if [ -f rt2800lib.o ]; then
+            arm-linux-gnueabi-ld -r -o rt2800lib.ko rt2800lib.o && echo "rt2800lib.ko created" || echo "rt2800lib.ko failed"
+          fi
           cd ../../../../
           echo "Exit: done"
 
