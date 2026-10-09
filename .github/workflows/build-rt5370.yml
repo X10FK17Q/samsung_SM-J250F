@@ -30,19 +30,34 @@ jobs:
 
       - name: Patch kernel for GCC >= 10 and Python 3 compatibility
         run: |
-          # Fix 1: gcc-wrapper.py uses Python 2 print syntax -> patch to Python 3
-          sed -i 's/print "error, forbidden warning:", m.group(2)/print("error, forbidden warning:", m.group(2))/' scripts/gcc-wrapper.py
-          sed -i 's/print "suppressing warning: %s" % m.group(2)/print("suppressing warning: %s" % m.group(2))/' scripts/gcc-wrapper.py
-          echo "gcc-wrapper.py patched"
+          # Fix 1: gcc-wrapper.py - convert ALL Python 2 print statements to Python 3
+          # Uses python3 itself to do the conversion safely
+          python3 -c "
+import re, sys
+with open('scripts/gcc-wrapper.py', 'r') as f:
+    content = f.read()
+# Replace: print \"...\", var  ->  print(\"...\", var)
+content = re.sub(r'print (\"[^\"]*\"),\s*(.*)', r'print(\1, \2)', content)
+# Replace: print \"...\" % var  ->  print(\"...\" % var)
+content = re.sub(r'print (\"[^\"]*\" % \S+)', r'print(\1)', content)
+# Replace standalone: print line,  ->  print(line, end=' ')
+content = re.sub(r'print line,', r'print(line, end=\" \")', content)
+# Replace: print line  ->  print(line)
+content = re.sub(r'^(\s*)print line\s*$', r'\1print(line)', content, flags=re.MULTILINE)
+with open('scripts/gcc-wrapper.py', 'w') as f:
+    f.write(content)
+print('gcc-wrapper.py patched')
+"
+          python3 -c "import py_compile; py_compile.compile('scripts/gcc-wrapper.py')" && echo "gcc-wrapper.py syntax OK"
 
           # Fix 2: scripts/dtc yylloc multiple definition (GCC >= 10 strict common)
-          sed -i 's/YYLTYPE yylloc;/extern YYLTYPE yylloc;/' scripts/dtc/dtc-lexer.lex.c_shipped || true
-          sed -i 's/YYLTYPE yylloc;/extern YYLTYPE yylloc;/' scripts/dtc/dtc-lexer.l || true
+          sed -i 's/^YYLTYPE yylloc;/extern YYLTYPE yylloc;/' scripts/dtc/dtc-lexer.lex.c_shipped || true
+          sed -i 's/^YYLTYPE yylloc;/extern YYLTYPE yylloc;/' scripts/dtc/dtc-lexer.l || true
           echo "dtc yylloc patched"
 
-          # Fix 3: remove -Werror-type flags that fail with modern GCC
-          sed -i 's/-Werror-implicit-function-declaration//' Makefile || true
-          echo "Makefile patched"
+          # Fix 3: scripts/mod - also has Python 2 print issues, build modpost from host gcc directly
+          # Nothing to patch here; modpost builds with host gcc, issue is gcc-wrapper intercepting it
+          echo "patches done"
 
       - name: Fetch RT2X00 driver sources from upstream linux v3.18
         run: |
