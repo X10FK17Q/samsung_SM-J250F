@@ -1,39 +1,59 @@
 #!/usr/bin/env python3
-"""Patch kernel 3.18 scripts for Python3 + GCC>=10 compatibility."""
-import re, os, sys
+"""Patch kernel 3.18 for Python3 + GCC>=10. Rewrites gcc-wrapper.py directly."""
+import os, re
 
-# --- Patch 1: gcc-wrapper.py ---
+# ── Patch 1: Rewrite scripts/gcc-wrapper.py as clean Python 3 ────────────────
 path = 'scripts/gcc-wrapper.py'
 if os.path.exists(path):
-    with open(path, 'r') as f:
-        src = f.read()
-    # print "str", var  ->  print("str", var)
-    src = re.sub(r'print (".*?"),\s*(.+)', r'print(\1, \2)', src)
-    # print "str" % var  ->  print("str" % var)
-    src = re.sub(r'print (".*?" % \S+)', r'print(\1)', src)
-    # print line,  ->  print(line, end="")
-    src = src.replace('print line,', 'print(line, end="")')
-    # print line  ->  print(line)
-    src = re.sub(r'^(\s*)print line\s*$', r'\1print(line)', src, flags=re.MULTILINE)
-    with open(path, 'w') as f:
-        f.write(src)
-    print(f"[OK] {path} patched")
+    content = open(path).read()
+    # Fix: print "str", var  ->  print("str", var)
+    content = content.replace(
+        'print "error, forbidden warning:", m.group(2)',
+        'print("error, forbidden warning:", m.group(2))'
+    )
+    # Fix: print line,  ->  print(line, end="")
+    content = content.replace(
+        'print line,',
+        'print(line, end="")'
+    )
+    # Fix: print args[0] + ':',e.strerror  ->  print(args[0]+':',e.strerror)
+    content = content.replace(
+        "print args[0] + ':',e.strerror",
+        "print(args[0] + ':', e.strerror)"
+    )
+    # Fix: print 'Is your PATH...'  ->  print('Is your PATH...')
+    content = content.replace(
+        "print 'Is your PATH set correctly?'",
+        "print('Is your PATH set correctly?')"
+    )
+    # Fix: print ' '.join(args), str(e)  ->  print(...)
+    content = content.replace(
+        "print ' '.join(args), str(e)",
+        "print(' '.join(args), str(e))"
+    )
+    # Fix bytes from subprocess stderr
+    content = content.replace(
+        'for line in proc.stderr:',
+        'for line in proc.stderr:\n            if isinstance(line, bytes): line = line.decode("utf-8", errors="replace")'
+    )
+    # Fix shebang
+    content = content.replace('#! /usr/bin/env python2', '#! /usr/bin/env python3')
+    open(path, 'w').write(content)
+    print("[OK] gcc-wrapper.py patched")
 else:
-    print(f"[SKIP] {path} not found")
+    print("[SKIP] gcc-wrapper.py not found")
 
-# --- Patch 2: dtc-lexer yylloc multiple definition ---
-for path in ['scripts/dtc/dtc-lexer.lex.c_shipped', 'scripts/dtc/dtc-lexer.l']:
-    if os.path.exists(path):
-        with open(path, 'r') as f:
-            src = f.read()
-        patched = re.sub(r'^YYLTYPE yylloc;', 'extern YYLTYPE yylloc;', src, flags=re.MULTILINE)
-        if patched != src:
-            with open(path, 'w') as f:
-                f.write(patched)
-            print(f"[OK] {path} yylloc patched")
+# ── Patch 2: dtc yylloc (GCC>=10 strict no-common) ───────────────────────────
+for p in ['scripts/dtc/dtc-lexer.lex.c_shipped', 'scripts/dtc/dtc-lexer.l']:
+    if os.path.exists(p):
+        src = open(p).read()
+        new = re.sub(r'^YYLTYPE yylloc;', 'extern YYLTYPE yylloc;', src, flags=re.MULTILINE)
+        if new != src:
+            open(p, 'w').write(new)
+            print(f"[OK] {p} yylloc patched")
         else:
-            print(f"[SKIP] {path} yylloc already ok or not found")
+            print(f"[SKIP] {p} already ok")
     else:
-        print(f"[SKIP] {path} not found")
+        print(f"[SKIP] {p} not found")
 
-print("All patches done.")
+print("Done.")
