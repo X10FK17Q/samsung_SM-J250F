@@ -38,6 +38,11 @@ if os.path.exists(path):
     )
     # Fix shebang
     content = content.replace('#! /usr/bin/env python2', '#! /usr/bin/env python3')
+    # Add log2.h:22 to allowed_warnings (GCC 11+ warning about conflicting attributes)
+    content = content.replace(
+        '"pppopns.c:336",\n ])',
+        '"pppopns.c:336",\n    "log2.h:22",\n ])'
+    )
     open(path, 'w').write(content)
     print("[OK] gcc-wrapper.py patched")
 else:
