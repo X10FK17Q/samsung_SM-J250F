@@ -30,13 +30,13 @@ jobs:
 
       - name: Fetch RT2X00 driver sources from upstream linux v3.18
         run: |
-          mkdir -p drivers/net/wireless/ralink/rt2x00
-          BASE="https://raw.githubusercontent.com/torvalds/linux/v3.18/drivers/net/wireless/ralink/rt2x00"
+          mkdir -p drivers/net/wireless/rt2x00
+          BASE="https://raw.githubusercontent.com/torvalds/linux/v3.18/drivers/net/wireless/rt2x00"
           FILES="rt2x00.h rt2x00dev.c rt2x00lib.h rt2x00lib.c rt2x00config.c rt2x00crypto.c rt2x00debug.c rt2x00debug.h rt2x00dump.h rt2x00firmware.c rt2x00leds.c rt2x00leds.h rt2x00link.c rt2x00mac.c rt2x00mmio.c rt2x00mmio.h rt2x00queue.c rt2x00queue.h rt2x00reg.h rt2x00soc.c rt2x00usb.c rt2x00usb.h rt2800lib.c rt2800lib.h rt2800.h rt2800usb.c rt2800usb.h Kconfig Makefile"
           for f in $FILES; do
-            wget -q "$BASE/$f" -O "drivers/net/wireless/ralink/rt2x00/$f" || echo "WARNING: could not fetch $f"
+            wget -q "$BASE/$f" -O "drivers/net/wireless/rt2x00/$f" || echo "WARNING: could not fetch $f"
           done
-          ls -la drivers/net/wireless/ralink/rt2x00/
+          ls -la drivers/net/wireless/rt2x00/
 
       - name: Load defconfig
         run: |
@@ -70,16 +70,16 @@ jobs:
 
       - name: Compile RT5370 modules
         run: |
-          make ARCH=arm CROSS_COMPILE=arm-linux-gnueabi- -j$(nproc) M=drivers/net/wireless/ralink/rt2x00 modules 2>&1 | tee build.log
+          make ARCH=arm CROSS_COMPILE=arm-linux-gnueabi- -j$(nproc) M=drivers/net/wireless/rt2x00 modules 2>&1 | tee build.log
 
       - name: List compiled .ko files
         run: |
-          find drivers/net/wireless/ralink/rt2x00 -name "*.ko" -exec ls -lh {} \;
+          find drivers/net/wireless/rt2x00 -name "*.ko" -exec ls -lh {} \;
 
       - name: Package modules
         run: |
           mkdir -p output/rt5370_modules
-          find drivers/net/wireless/ralink/rt2x00 -name "*.ko" -exec arm-linux-gnueabi-strip --strip-debug {} \; -exec cp {} output/rt5370_modules/ \;
+          find drivers/net/wireless/rt2x00 -name "*.ko" -exec arm-linux-gnueabi-strip --strip-debug {} \; -exec cp {} output/rt5370_modules/ \;
           printf '#!/system/bin/sh\nBASE=/data/local/tmp\ninsmod $BASE/rt2x00lib.ko\ninsmod $BASE/rt2x00usb.ko\ninsmod $BASE/rt2800lib.ko\ninsmod $BASE/rt2800usb.ko\necho Done\n' > output/rt5370_modules/load_rt5370.sh
           printf 'RT5370 for Galaxy J2 Pro (SM-J250F) msm8937\nadb push *.ko /data/local/tmp/\nadb shell su -c sh /data/local/tmp/load_rt5370.sh\n' > output/rt5370_modules/README.txt
           cd output && zip -r rt5370_modules_j2pro_msm8937.zip rt5370_modules/
